@@ -15,8 +15,8 @@ tile は、Claude Code / Codex が動いている Terminal.app のウィンド�
 
 ```
 $ tile
-Terminal: 3枚を閉じた（Claude Code/Codex 実行中の9枚は残す）
-2画面: 6枚/1段 + 3枚/1段 / 18pt
+Terminal: Closed 3 idle window(s), kept 9 running Claude Code/Codex
+2 display(s): 6 in 1 row(s) + 3 in 1 row(s) / 18pt
 ```
 
 ---

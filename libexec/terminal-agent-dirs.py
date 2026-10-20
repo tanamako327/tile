@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Claude Code / Codex が動いている Terminal.app ウィンドウの作業ディレクトリを調べる（/tile から呼ぶ）。
+"""Find the working directory of each Terminal.app window running Claude Code / Codex (called by tile).
 
-出力: 1行1ウィンドウで「window id<TAB>作業ディレクトリ<TAB>左端に固定するなら1<TAB>優先テーマなら1<TAB>テーマ名」。
-優先度の高いテーマ → 作業ディレクトリの順に並べるので、/tile は出力順のまま左から置けばよく、同じディレクトリのウィンドウも隣り合う。
-テーマは ~/.config/tile/priorities.json（環境変数 TILE_CONFIG で変えられる）。owner_rank のあるテーマが先で、残りはタスクDBから作った順位
-（任意。~/.cache/tile-theme-order.json。rank_command を設定したときだけ、古くなったら同じディレクトリの tile-priority-refresh.py を裏で起動して作り直す）
-→ 設定ファイルの記載順。
---label を付けると、各タブへ OSC 7（作業ディレクトリ通知）を送り、ウィンドウのタイトル先頭にディレクトリ名を出す。
-Claude Code は cd と同じコマンド行で起動されるため、シェルが最後に通知したディレクトリ（ホーム等）が表示されたままになっているのを直す。
+Output: one line per window, "window id<TAB>working directory<TAB>1 if pinned<TAB>1 if it matches a theme<TAB>theme name".
+Lines are sorted by theme priority, then by working directory, so tile can place them left to right in output order
+and windows with the same directory end up next to each other.
+Themes come from ~/.config/tile/priorities.json (override with TILE_CONFIG). Themes with owner_rank come first, then
+the optional rank_command ranking (~/.cache/tile-theme-order.json, rebuilt in the background by tile-priority-refresh.py
+in this directory when stale), then the order in the file.
+With --label, an OSC 7 sequence (working directory notification) is written to each tab so the window title starts
+with the directory name. Claude Code is often started on the same command line as cd, which leaves the title showing
+the directory the shell last reported (such as the home directory).
 
-プロセスは ps の comm と lsof の cwd だけを読む（argv は secret を含み得るので読まない）。
+Only the process name (ps comm) and cwd (lsof) are read. argv is never read because it can contain secrets.
 """
 import glob
 import json
@@ -21,9 +23,8 @@ import time
 from urllib.parse import quote
 
 AGENT_NAMES = ("claude", "codex")
-# セッションのタイトル（/rename の名前か自動タイトル）に priorities.json の pin_title_keys のどれかを含むウィンドウは、
-# /tile が左端に縦いっぱいで固定する（未設定なら固定しない）
-# 優先テーマ（/tile が優先度の高い順に左から置く）の定義と、タスクDBから作った順位の置き場
+# A window whose session title (the /rename name or the generated title) contains any of pin_title_keys in
+# priorities.json is pinned by tile as a full-height column on the far left (no pinning when unset)
 THEME_CONFIG = os.path.expanduser(os.environ.get("TILE_CONFIG", "~/.config/tile/priorities.json"))
 REFRESH_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tile-priority-refresh.py")
 THEME_ORDER_CACHE = os.path.expanduser("~/.cache/tile-theme-order.json")
@@ -39,7 +40,7 @@ def load_config():
 
 
 def load_themes(config):
-    """優先テーマを優先度の高い順で返す。owner_rank → タスクDBの順位 → 設定ファイルの記載順"""
+    """Return themes in priority order: owner_rank, then the rank_command ranking, then the order in the file"""
     themes = config.get("themes", [])
     if not themes:
         return []
@@ -51,7 +52,7 @@ def load_themes(config):
     except (OSError, ValueError):
         age = None
     if config.get("rank_command") and (age is None or age > THEME_ORDER_TTL_SEC):
-        # 作り直しは数十秒かかるので待たない（今回は前回の順位を使い、次回から新しい順位になる）
+        # Rebuilding can take tens of seconds, so don't wait: this run uses the previous ranking
         try:
             subprocess.Popen(["/usr/bin/python3", REFRESH_SCRIPT],
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -65,7 +66,7 @@ def load_themes(config):
 
 
 def theme_rank(themes, cwd, title, prompt):
-    """ウィンドウ → (順位, テーマ名)。作業ディレクトリとタイトルで決まらないときだけ直近の依頼文を見る"""
+    """Window → (rank, theme name). The latest prompt is used only when the directory and title match nothing"""
     parts = cwd.split(os.sep)
     primary = f"{cwd}\n{title}".lower()
     for i, th in enumerate(themes):
@@ -79,7 +80,7 @@ def theme_rank(themes, cwd, title, prompt):
 
 
 def session_info(pid):
-    """claude の pid → ~/.claude/sessions/<pid>.json の sessionId → 会話ログの (タイトル, 自動タイトル, 直近の依頼文)"""
+    """claude pid → sessionId in ~/.claude/sessions/<pid>.json → (title, generated title, latest prompt) from the session log"""
     home = os.path.expanduser("~")
     try:
         with open(os.path.join(home, ".claude", "sessions", f"{pid}.json")) as f:
@@ -140,7 +141,7 @@ def main():
             'return out\n'
             'end tell')
     if r.returncode != 0:
-        sys.exit(f"Terminal のウィンドウ一覧を取得できません: {r.stderr.strip()}")
+        sys.exit(f"Could not list Terminal windows: {r.stderr.strip()}")
     host = socket.gethostname()
     config = load_config()
     themes = load_themes(config)
@@ -151,7 +152,7 @@ def main():
         if not parts:
             continue
         wid, frame, ttys = parts[0], parts[1], parts[2:]
-        win_dir, auto, rank, theme = None, False, len(themes), ""
+        win_dir, pinned, rank, theme = None, False, len(themes), ""
         for tty in ttys:
             pid = agent_pid(tty)
             cwd = process_cwd(pid) if pid else None
@@ -160,7 +161,7 @@ def main():
             win_dir = win_dir or cwd
             custom, ai_title, prompt = session_info(pid)
             title = (custom or ai_title).lower()
-            auto = auto or any(k.lower() in title for k in pin_keys)
+            pinned = pinned or any(k.lower() in title for k in pin_keys)
             r, name = theme_rank(themes, cwd, f"{custom}\n{ai_title}", prompt)
             if r < rank:
                 rank, theme = r, name
@@ -171,15 +172,15 @@ def main():
                 except OSError:
                     pass
         if win_dir:
-            rows.append((rank, win_dir, int(wid), auto, theme, frame))
-    # タブでまとめたウィンドウは枠が共通で /tile は1枚として置くので、その中で一番優先度の高いテーマにそろえる
+            rows.append((rank, win_dir, int(wid), pinned, theme, frame))
+    # Tabs merged into one window share a frame and are placed as one, so give them the best theme among them
     best = {}
     for row in rows:
         if row[5] not in best or row[0] < best[row[5]][0]:
             best[row[5]] = (row[0], row[4])
-    rows = [(best[f][0], d, w, a, best[f][1]) for _, d, w, a, _, f in rows]
-    for rank, cwd, wid, auto, theme in sorted(rows):
-        print(f"{wid}\t{cwd}\t{1 if auto else 0}\t{1 if theme else 0}\t{theme}")
+    rows = [(best[f][0], d, w, p, best[f][1]) for _, d, w, p, _, f in rows]
+    for rank, cwd, wid, pinned, theme in sorted(rows):
+        print(f"{wid}\t{cwd}\t{1 if pinned else 0}\t{1 if theme else 0}\t{theme}")
 
 
 if __name__ == "__main__":

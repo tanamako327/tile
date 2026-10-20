@@ -15,11 +15,9 @@ Use it when you keep three or more agent sessions open at once. With one or two 
 
 ```
 $ tile
-Terminal: 3枚を閉じた（Claude Code/Codex 実行中の9枚は残す）
-2画面: 6枚/1段 + 3枚/1段 / 18pt
+Terminal: Closed 3 idle window(s), kept 9 running Claude Code/Codex
+2 display(s): 6 in 1 row(s) + 3 in 1 row(s) / 18pt
 ```
-
-> The command prints its summary in Japanese ("closed 3, kept 9 / 2 displays: 6 in 1 row + 3 in 1 row / 18pt"). The layout itself works the same on English and Japanese macOS.
 
 ---
 

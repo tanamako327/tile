@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Claude Code / Codex が動いていない Terminal.app のウィンドウを閉じる（/tile の前処理）。
+"""Close Terminal.app windows that are not running Claude Code / Codex (first step of tile).
 
-判定は各タブの tty のプロセス名（ps の comm）が claude / codex で始まるかだけで、argv は読まない（secret を含み得るため）。
-別デスクトップ・最小化のウィンドウも閉じる。
+A window is kept if any of its tabs has a process whose name (ps comm) starts with claude or codex.
+argv is never read because it can contain secrets. Windows on other desktops and minimized windows are closed too.
 
-使い方: close-idle-windows.py [--dry-run]
+Usage: close-idle-windows.py [--dry-run]
 """
 import argparse
 import os
@@ -38,7 +38,7 @@ def terminal_windows():
             'return out\n'
             'end tell')
     if r.returncode != 0:
-        sys.exit(f"Terminal のウィンドウ一覧を取得できません: {r.stderr.strip()}")
+        sys.exit(f"Could not list Terminal windows: {r.stderr.strip()}")
     wins = []
     for line in r.stdout.splitlines():
         parts = [p for p in line.strip().split(",") if p]
@@ -49,7 +49,7 @@ def terminal_windows():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true", help="閉じずに枚数だけ出す")
+    ap.add_argument("--dry-run", action="store_true", help="only count, do not close")
     args = ap.parse_args()
 
     closed, kept = 0, 0
@@ -60,8 +60,8 @@ def main():
         closed += 1
         if not args.dry_run:
             osa(f'tell application "Terminal" to close (every window whose id is {wid}) saving no')
-    verb = "閉じる予定" if args.dry_run else "閉じた"
-    print(f"Terminal: {closed}枚を{verb}（Claude Code/Codex 実行中の{kept}枚は残す）")
+    verb = "Would close" if args.dry_run else "Closed"
+    print(f"Terminal: {verb} {closed} idle window(s), kept {kept} running Claude Code/Codex")
 
 
 if __name__ == "__main__":

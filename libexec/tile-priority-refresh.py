@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""/tile の並び順に使うテーマの順位を、外部コマンドから作り直す（任意機能。terminal-agent-dirs.py が古くなったら裏で呼ぶ）。
+"""Rebuild the theme ranking used by tile from an external command (optional; terminal-agent-dirs.py runs it when stale).
 
-priorities.json の rank_command を設定したときだけ動く。rank_command は引数の配列で、"{query}" をテーマの rank_queries の
-各語に置き換えて実行する（rank_cwd があればそこで実行）。コマンドは未完了の項目を JSON で標準出力に返す:
-  [{"id": "...", "deadline": "YYYY-MM-DD"}, ...]  または  {"tasks": [...]}
-テーマを「一番近い期限 → 件数」の順に並べて ~/.cache/tile-theme-order.json に書く。owner_rank のあるテーマはその順が先で、
-ここの順位は使わない。コマンドが失敗したテーマは前回の値を残す（失敗を 0 件として扱わない）。項目のタイトルは保存しない。
+Runs only when rank_command is set in priorities.json. rank_command is an argument array; "{query}" is replaced with
+each word in a theme's rank_queries, and the command runs in rank_cwd if given. The command prints the open items as JSON:
+  [{"id": "...", "deadline": "YYYY-MM-DD"}, ...]  or  {"tasks": [...]}
+Themes are ordered by nearest deadline, then by item count, and written to ~/.cache/tile-theme-order.json. Themes with
+owner_rank keep that order and ignore this ranking. A theme whose command fails keeps its previous value (a failure is
+never counted as zero items). Item titles are not stored.
+
+Usage: tile-priority-refresh.py [--print]
 """
 import datetime
 import json
@@ -16,14 +19,14 @@ import sys
 HOME = os.path.expanduser("~")
 CONFIG = os.path.expanduser(os.environ.get("TILE_CONFIG", "~/.config/tile/priorities.json"))
 CACHE = os.path.join(HOME, ".cache", "tile-theme-order.json")
-# 期限切れは 7 日前までを「今の仕事」として数える（古い期限切れが先頭を取り続けないようにする）
+# Count overdue items only from the last 7 days so old overdue items don't hold the top spot forever
 OVERDUE_DAYS = 7
-# Homebrew の node などを見つけられるよう PATH に足す
+# Add Homebrew locations so commands such as node can be found
 EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin")
 
 
 def find_items(command, cwd, query):
-    """検索語 → 未完了の項目の一覧。取れなかったら None"""
+    """Query → list of open items, or None if the command failed"""
     env = dict(os.environ)
     env["PATH"] = os.pathsep.join(EXTRA_PATH) + os.pathsep + env.get("PATH", "")
     argv = [a.replace("{query}", query) for a in command]
@@ -47,7 +50,7 @@ def main():
     themes = config.get("themes", [])
     command = config.get("rank_command")
     if not command or not isinstance(command, list):
-        sys.exit("rank_command が未設定です（順位は owner_rank と記載順だけで決まります）")
+        sys.exit("rank_command is not set (themes are ordered by owner_rank and file order only)")
     cwd = os.path.expanduser(config["rank_cwd"]) if config.get("rank_cwd") else None
     try:
         with open(CACHE) as f:
@@ -84,7 +87,7 @@ def main():
     if "--print" in sys.argv[1:]:
         for name in order:
             s = stats[name]
-            print(f"{s['rank']}\t{name}\t未完了{s.get('open', 0)}件\t期限{s.get('nearest_deadline') or '-'}{' (前回値)' if s.get('stale') else ''}")
+            print(f"{s['rank']}\t{name}\topen {s.get('open', 0)}\tdeadline {s.get('nearest_deadline') or '-'}{' (previous value)' if s.get('stale') else ''}")
 
 
 if __name__ == "__main__":

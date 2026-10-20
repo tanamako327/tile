@@ -1,57 +1,58 @@
--- Claude Code が動いている Terminal ウィンドウを、外部モニター1台につき6枚まで縦長1段で（超えたら右のモニターへ。無ければ前面のディスプレイ）等間隔に並べる
--- 外部モニターが2台以上で Codex のウィンドウがあれば、Claude Code は左のモニター・Codex は右のモニターに分けて並べる
--- 使い方: tile             … 文字サイズはディスプレイの大きさから自動で決める
---         tile 14          … 文字サイズを 14pt に指定して並べる
---         tile row         … 縦長1段で横幅を等分する
---         tile grid        … 段数を √枚数 にして並べる（外部モニターが無いときの既定は8枚以下なら縦長1段・9枚以上は上下2段）
---         tile --no-close  … Claude Code / Codex が動いていないウィンドウを閉じずに並べる
--- 補助スクリプトは環境変数 TILE_HOME（既定 ~/.local/share/tile）の libexec/ から呼ぶ
+-- Arrange Terminal windows running Claude Code / Codex evenly: up to 6 per external monitor in one full-height row
+-- (overflow goes to the next monitor on the right; without external monitors, the display of the front window is used).
+-- With 2+ external monitors and at least one Codex window, Claude Code goes to the leftmost monitor and Codex to the rightmost.
+-- Usage: tile             … font size is chosen from the display size
+--        tile 14          … use 14pt
+--        tile row         … one full-height row with equal widths
+--        tile grid        … floor(√n) rows (default without external monitors: one row up to 8 windows, two rows from 9)
+--        tile --no-close  … do not close windows that are not running Claude Code / Codex
+-- Helper scripts are loaded from $TILE_HOME/libexec/ (default ~/.local/share/tile).
 
--- 文字サイズの自動決定の基準（MacBook 14インチ標準解像度の使える領域で 12pt）
+-- Reference for the automatic font size (12pt on the usable area of a 14" MacBook at default resolution)
 property baseWidth : 1512
 property baseHeight : 908
 property baseFont : 12
 property floorFontSize : 12
 property maxFont : 18
--- 外部モニター1台に縦長1段で並べる上限。超えた分は右のモニターへ
+-- Max windows per external monitor in a single row; the rest go to the next monitor on the right
 property perMonitor : 6
 
 on run argv
 	set libDir to my libexecDir()
-	-- 0-a. Claude Code / Codex が動いていない Terminal ウィンドウを全部閉じる
+	-- 0a. Close every Terminal window that is not running Claude Code / Codex
 	set noClose to argv contains "--no-close"
-	set closeMsg to "既存ウィンドウは閉じずに整列"
+	set closeMsg to "Kept all windows open (--no-close)"
 	if not noClose then
 		set closeMsg to do shell script "/usr/bin/python3 " & quoted form of (libDir & "close-idle-windows.py")
 	end if
-	-- 0. 対象ディスプレイ = 外部モニター全部（左から順）。つながっていなければ前面のTerminalウィンドウがあるディスプレイ
+	-- 0. Target displays = all external monitors (left to right), or the display of the front Terminal window if none
 	tell application "Terminal" to activate
 	delay 0.3
 	set {screens, isExternal} to my screenList()
 	set k to count of screens
-	-- 対象は文字サイズ変更の前に確定する（変更でウィンドウが伸びて画面外に出ると取りこぼすため）
-	-- 外部モニターがあるときは、どのディスプレイにあるウィンドウも外部モニターへ集める
+	-- Collect targets before changing the font size (resized windows can grow off screen and be missed)
+	-- With external monitors, windows on any display are gathered onto them
 	set {fx, fy, fw, fh} to items 1 thru 4 of (item 1 of screens)
 	set targetIds to my targetWindowIds(fx, fy, fw, fh, isExternal)
-	if targetIds is {} then return closeMsg & linefeed & "対象のウィンドウがありません"
-	-- 引数: 数字は文字サイズ、row（tall / 縦長）は縦長1段、grid（段組）は段組を強制する
+	if targetIds is {} then return closeMsg & linefeed & "No Claude Code / Codex windows on the current desktop"
+	-- Arguments: a number sets the font size, row (or tall) forces one row, grid forces a grid
 	set fontArg to 0
 	set modeArg to ""
 	repeat with a in argv
 		set a to a as text
 		if a is "--no-close" then
-			-- ウィンドウを閉じずに整列する
-		else if {"row", "tall", "縦長"} contains a then
+			-- handled above
+		else if {"row", "tall"} contains a then
 			set modeArg to "row"
-		else if {"grid", "段組"} contains a then
+		else if a is "grid" then
 			set modeArg to "grid"
 		else
 			set fontArg to a as number
 		end if
 	end repeat
-	-- 優先度の高いテーマのウィンドウから左に置き、同じ作業ディレクトリのウィンドウが隣り合うよう並べ替える（左上から右へ、段を下へ詰める）
-	-- 順番は terminal-agent-dirs.py が決める（~/.config/tile/priorities.json の owner_rank → タスクDBから作った順位（任意） → ディレクトリ順）
-	-- あわせて各タブのタイトル先頭に作業ディレクトリ名を出す（terminal-agent-dirs.py --label）
+	-- Place higher-priority themes first and keep windows with the same working directory adjacent (left to right, then next row)
+	-- The order comes from terminal-agent-dirs.py (owner_rank in priorities.json → optional rank_command ranking → directory)
+	-- It also writes the working directory name into each tab title (--label)
 	set dirOut to do shell script "/usr/bin/python3 " & quoted form of (libDir & "terminal-agent-dirs.py") & " --label"
 	set sortedIds to {}
 	set prioIds to {}
@@ -64,18 +65,18 @@ on run argv
 			set isPin to (text item 3 of (ln as text)) is "1"
 			set isPrio to (text item 4 of (ln as text)) is "1"
 			set AppleScript's text item delimiters to ""
-			-- セッションのタイトルが pin_title_keys に当たるウィンドウは左端の縦長に回す
+			-- A window whose session title matches pin_title_keys becomes the full-height column on the far left
 			if targetIds contains wid then
 				if isPin and pinId = 0 then
 					set pinId to wid
 				else if isPrio then
-					-- 優先テーマのウィンドウは、出力順（優先度の高い順）のまま他のウィンドウより左に置く
+					-- Theme windows keep the output order (highest priority first) and go left of the others
 					set end of prioIds to wid
 				else
 					set end of sortedIds to wid
 				end if
 			else if isPin then
-				-- 別デスクトップ・最小化の窓は動かせないので、縦長に置けなかったことを結果に出す
+				-- Windows on another desktop or minimized cannot be moved; report that the pinned window was skipped
 				set pinAway to true
 			end if
 		end if
@@ -85,18 +86,18 @@ on run argv
 	end repeat
 	set targetIds to prioIds & sortedIds
 	set n to count of targetIds
-	-- 外部モニターが無いときは、Claude Code / Codex のウィンドウ（固定する窓を含む）が8枚以下なら縦長1段、9枚以上は上下2段
-	-- 引数 row なら枚数に関係なく縦長1段、grid なら段組にする
+	-- Without external monitors: one row for up to 8 windows (including the pinned one), two rows from 9
+	-- row always uses one row; grid always uses a grid
 	set builtinCount to n
 	if pinId ≠ 0 then set builtinCount to n + 1
 	set builtinRow to (not isExternal) and (modeArg is "row" or (modeArg is not "grid" and builtinCount ≤ 8))
-	-- 固定するウィンドウがあれば、それを左のモニターの一番左に縦長で置く
+	-- The pinned window, if any, becomes a full-height column at the far left of the leftmost monitor
 	set monId to 0
 	if pinId ≠ 0 then set monId to pinId
 	set slots to n
 	if monId ≠ 0 then set slots to n + 1
-	-- 外部モニターは1台につき perMonitor 枚まで縦長1段で並べ、超えた分は右のモニターへ縦長1段で並べる（例: 6枚 → 左6 / 9枚 → 左6・右3）
-	-- 全モニターの枠（台数 × perMonitor）を超えるときだけ、従来どおり均等に分けて段組にする
+	-- Each external monitor takes up to perMonitor windows in one row; the rest go right (e.g. 6 → 6 / 9 → 6 + 3)
+	-- Only when windows exceed monitors × perMonitor are they split evenly into grids
 	set fillRow to false
 	if isExternal and modeArg is not "grid" and slots ≤ perMonitor * k then
 		set fillRow to true
@@ -108,8 +109,8 @@ on run argv
 	if modeArg is "grid" then set singleRow to false
 	if k > slots then set k to slots
 
-	-- 外部モニターが2台以上なら、Claude Code のウィンドウ（固定する窓を含む）を左のモニター、Codex のウィンドウを右のモニターに分ける
-	-- 各モニターは perMonitor 枚まで縦長1段、超えたら段組。Codex のウィンドウが無ければ従来どおり左から詰める
+	-- With 2+ external monitors, Claude Code windows (including the pinned one) go to the leftmost monitor and Codex windows to the rightmost
+	-- Each uses one row up to perMonitor, then a grid. Without Codex windows, monitors are filled from the left as above
 	set splitMode to false
 	set claudeIds to {}
 	set codexIds to {}
@@ -125,8 +126,8 @@ on run argv
 		if codexIds is not {} then set splitMode to true
 	end if
 
-	-- 外部モニターが複数なら、1枚のディスプレイに詰め込まないよう枚数を均等に分ける（例: 16枚・2枚 → 8,8 / 15枚 → 8,7）
-	-- 各ディスプレイの {使える領域x, 上端y, 幅, 高さ, そのディスプレイに置くウィンドウid一覧, 固定する窓を置くか, 縦長1段か}
+	-- In grid mode, windows are split evenly across monitors (e.g. 16 on 2 → 8, 8 / 15 → 8, 7)
+	-- Plan per display: {usable x, top y, width, height, window ids, has pinned window, single row}
 	set plans to {}
 	if splitMode then
 		set claudeCells to count of claudeIds
@@ -142,7 +143,7 @@ on run argv
 				set cnt to slots - (si - 1) * perMonitor
 				if cnt > perMonitor then set cnt to perMonitor
 			end if
-			-- 固定する窓は1枚目（一番左）のディスプレイの枠を1つ使う
+			-- The pinned window takes one slot on the first (leftmost) display
 			set planMon to 0
 			if si = 1 then set planMon to monId
 			if planMon ≠ 0 then set cnt to cnt - 1
@@ -156,8 +157,8 @@ on run argv
 		end repeat
 	end if
 
-	-- 1. 文字サイズを決めてプロファイルに設定（大きいディスプレイほど大きく。基準比の小さい方で拡大し、12〜18ptに収める）
-	-- 文字サイズはプロファイル共通なので、ディスプレイが複数なら一番小さいディスプレイに合わせる
+	-- 1. Choose the font size and set it on the profile (scaled by the smaller of the width/height ratios, clamped to floorFontSize..maxFont)
+	-- The profile is shared, so with several displays the smallest one decides
 	if fontArg ≠ 0 then
 		set fontSize to fontArg
 	else
@@ -171,7 +172,7 @@ on run argv
 		if fontSize > maxFont then set fontSize to maxFont
 	end if
 	tell application "Terminal" to set font size of default settings to fontSize
-	-- タブが前の文字サイズを持ったままだと ⌘0 でもその大きさに戻るだけなので、対象の各タブにも直接設定する
+	-- Tabs keep their previous size even after ⌘0, so set the size on each target tab as well
 	set fontIds to targetIds
 	if monId ≠ 0 then set fontIds to fontIds & {monId}
 	repeat with wid in fontIds
@@ -182,8 +183,8 @@ on run argv
 		end tell
 	end repeat
 
-	-- 2. ⌘+ / ⌘- で個別に拡大縮小されたウィンドウを、プロファイルの文字サイズ（⌘0 相当）に戻す
-	-- 前面化の反映が遅れて取りこぼすことがあるため、ずれたままのウィンドウだけ最大3周やり直す
+	-- 2. Reset windows zoomed with ⌘+ / ⌘- back to the profile font size (same as ⌘0)
+	-- Bringing a window to the front can lag, so retry only the windows still zoomed, up to 3 passes
 	set zoomIds to targetIds
 	if monId ≠ 0 then set zoomIds to zoomIds & {monId}
 	repeat 3 times
@@ -200,7 +201,7 @@ on run argv
 					set index of window id wid to 1
 					set selected of tab ti of window id wid to true
 				end tell
-				-- 前面化が反映される前にクリックすると別ウィンドウに効いてしまうので、前面になるまで待つ（最大2秒）
+				-- Wait until the window is actually in front (max 2s), otherwise the menu click hits another window
 				repeat 10 times
 					delay 0.2
 					tell application "Terminal" to if id of front window = wid then exit repeat
@@ -212,13 +213,13 @@ on run argv
 		end repeat
 	end repeat
 
-	-- 3. ディスプレイごとに、使える領域（メニューバーとDockを除く）に並べる。位置指定は window id で行う（index参照だと前面化のたびに順番がずれて重なる）
+	-- 3. Lay out each display's usable area (excluding menu bar and Dock). Address windows by id (indexes change as windows come to the front)
 	set summary to {}
 	set placed to {}
 	repeat with pl in plans
 		set {leftX, topY, sw, vh, ids, withMon, oneRow} to contents of pl
 		set m to count of ids
-		-- 縦が短いと読みにくいので、段数は √(枠数) の切り捨て（12枚→3段、19枚→4段）にして高さを確保する
+		-- Short windows are hard to read, so use floor(√cells) rows (12 → 3 rows, 19 → 4 rows) to keep them tall
 		set cells to m
 		if withMon then set cells to m + 1
 		set rows to 1
@@ -227,11 +228,11 @@ on run argv
 				set rows to rows + 1
 			end repeat
 		end if
-		-- 外部モニターが無いときは上下2段までにして、各段の横幅を等分する（引数 grid のときは √ の段数のまま）
+		-- Without external monitors, use at most 2 rows with equal widths per row (grid keeps the √ rows)
 		if (not isExternal) and modeArg is not "grid" and rows > 2 then set rows to 2
 		if rows > m and m > 0 then set rows to m
 		set h to vh / rows
-		-- 固定する窓は左端に縦いっぱいの1列（幅は他のウィンドウ1列分）。残りの幅に他のウィンドウを並べる
+		-- The pinned window is a full-height column on the left, one column wide; the others share the remaining width
 		if withMon then
 			if m = 0 then
 				set monW to sw
@@ -245,7 +246,7 @@ on run argv
 			set leftX to leftX + monW
 			set sw to sw - monW
 		end if
-		-- 各段に枚数を均等に割り振り（例: 14枚なら 5,5,4）、段ごとに横幅いっぱいまで等分する
+		-- Spread windows evenly over rows (e.g. 14 → 5, 5, 4) and split each row's full width equally
 		set i to 0
 		repeat with r from 0 to rows - 1
 			set inRow to m div rows
@@ -259,12 +260,12 @@ on run argv
 			end repeat
 		end repeat
 		if withMon then
-			set end of summary to "固定+" & (m as text) & "枚/" & rows & "段"
+			set end of summary to "pinned + " & (m as text) & " in " & rows & " row(s)"
 		else
-			set end of summary to (m as text) & "枚/" & rows & "段"
+			set end of summary to (m as text) & " in " & rows & " row(s)"
 		end if
 	end repeat
-	-- 後から置いたウィンドウに押されてずれることがあるので、全部置いた後にずれたものだけ置き直す（最大2周）
+	-- Later placements can push earlier windows; re-place only those that moved (up to 2 passes)
 	repeat 2 times
 		set moved to false
 		repeat with pw in placed
@@ -281,12 +282,12 @@ on run argv
 	set summaryText to summary as text
 	set AppleScript's text item delimiters to ""
 	set awayMsg to ""
-	if pinAway and pinId = 0 then set awayMsg to linefeed & "固定する窓は別デスクトップか最小化中のため縦長に置けません（今のデスクトップへ移してから再実行）"
-	return closeMsg & linefeed & (count of plans) & "画面: " & summaryText & " / " & fontSize & "pt" & awayMsg
+	if pinAway and pinId = 0 then set awayMsg to linefeed & "The pinned window is on another desktop or minimized, so it was not placed (move it to this desktop and run again)"
+	return closeMsg & linefeed & (count of plans) & " display(s): " & summaryText & " / " & fontSize & "pt" & awayMsg
 end run
 
--- ディスプレイ scr にウィンドウ ids（と、monId ≠ 0 なら左端に固定する窓）を置く計画を返す
--- 外部モニターのメニューバーは visibleFrame に含まれないことがあるので、1枚を上端へ置いて実際に置ける上端を測る
+-- Return the plan for placing ids (and the pinned window on the left when monId ≠ 0) on display scr
+-- An external monitor's menu bar is not always excluded from visibleFrame, so probe the real top edge with one window
 on makePlan(scr, ids, monId, oneRow)
 	set {sfx, sfy, sfw, sfh, leftX, topY, sw, vh} to scr
 	set withMon to (monId ≠ 0)
@@ -304,9 +305,9 @@ on makePlan(scr, ids, monId, oneRow)
 	return {leftX, topY, sw, vh, ids, withMon, oneRow}
 end makePlan
 
--- 並べる先のディスプレイ一覧と、外部モニターかどうかを {{{全体x, 全体y, 全体幅, 全体高さ, 使える領域x, 使える領域y, 使える幅, 使える高さ}, ...}, 外部なら true} で返す
--- 外部モニター（内蔵でないディスプレイ）が1枚以上あれば全部を左から順に、無ければ前面ウィンドウのあるディスプレイだけ
--- 座標は Terminal の bounds と同じ系（メインディスプレイ左上が原点・下向き正）
+-- Return {{{frame x, y, width, height, usable x, y, width, height}, ...}, true if external}
+-- All external (non-built-in) displays left to right if any, otherwise only the display of the front window
+-- Coordinates match Terminal bounds (origin at the main display's top-left, y grows downward)
 on screenList()
 	set js to "ObjC.import(\"AppKit\"); ObjC.import(\"CoreGraphics\"); var a=$.NSScreen.screens, H=a.objectAtIndex(0).frame.size.height, r=function(s){var f=s.frame, v=s.visibleFrame; return [f.origin.x, H-f.origin.y-f.size.height, f.size.width, f.size.height, v.origin.x, H-v.origin.y-v.size.height, v.size.width, v.size.height]}, ext=[]; for (var i=0;i<a.count;i++){var x=a.objectAtIndex(i); if (!$.CGDisplayIsBuiltin(ObjC.unwrap(x.deviceDescription.objectForKey(\"NSScreenNumber\")))) ext.push(r(x))} ext.sort(function(p,q){return p[0]-q[0]||p[1]-q[1]}); (ext.length ? \"1\\n\"+ext.map(function(e){return e.join(\",\")}).join(\"\\n\") : \"0\\n\"+r($.NSScreen.mainScreen).join(\",\"))"
 	set out to do shell script "osascript -l JavaScript -e " & quoted form of js
@@ -325,10 +326,10 @@ on screenList()
 	return {screens, isExternal}
 end screenList
 
--- 今見えているデスクトップ（Space）にあり、対象ディスプレイ上にあり（allScreens なら全ディスプレイ）、Claude Code が動いているウィンドウのidを返す
--- （別デスクトップのウィンドウは位置を変えられず、数に入れると画面に空きができるため）
+-- Return ids of windows on the current desktop (Space), on the target display (any display if allScreens), running Claude Code / Codex
+-- (windows on other desktops cannot be moved and would leave gaps if counted)
 on targetWindowIds(fx, fy, fw, fh, allScreens)
-	-- 今見えているデスクトップのウィンドウは System Events に出る。タイトルは Claude Code が動かし続けるので名前でなく位置と大きさで照合する
+	-- System Events lists only windows on the current desktop. Claude Code keeps changing titles, so match by position and size
 	set shownRects to {}
 	tell application "System Events" to tell process "Terminal"
 		repeat with aw in windows
@@ -337,8 +338,8 @@ on targetWindowIds(fx, fy, fw, fh, allScreens)
 			set end of shownRects to {px, py, px + qw, py + qh}
 		end repeat
 	end tell
-	-- 1つのウィンドウにタブでまとめられたものは Terminal では別ウィンドウに見えるが枠は共通で、System Events には1枚だけ出る
-	-- 同じ枠を2枚目以降が使うと重なって並ぶので、System Events の1枚につき1つだけ対象にする
+	-- Tabs merged into one window look like separate windows to Terminal but share one frame, which System Events lists once
+	-- Count each System Events window once so tabs do not get stacked on top of each other
 	set claimed to {}
 	repeat with r in shownRects
 		set end of claimed to false
@@ -365,7 +366,7 @@ on targetWindowIds(fx, fy, fw, fh, allScreens)
 	return ids
 end targetWindowIds
 
--- 1文字あたりの横幅が、今の文字サイズの標準幅（約0.6倍）から大きく外れるタブがあれば「個別に拡大縮小中」とみなす
+-- Treat a window as zoomed if any tab's pixels per column are far from the usual ~0.6 × font size
 on isZoomed(wid, fontSize)
 	tell application "Terminal"
 		set b to bounds of window id wid
@@ -377,10 +378,10 @@ on isZoomed(wid, fontSize)
 	return false
 end isZoomed
 
--- ウィンドウを bounds b に置く。外部モニターでは Terminal の bounds 指定が上端へ押し戻されることがあるので、
--- ずれたときはアクセシビリティ経由（今の位置と大きさが一致するウィンドウを探す）で位置と大きさを直す
+-- Move window wid to bounds b. On external monitors Terminal may push the window back to the top edge,
+-- so fall back to Accessibility (find the window by its current position and size) when it lands elsewhere
 on placeWindow(wid, b)
-	-- タイトルは同じ名前のウィンドウがあったり Claude Code が随時書き換えたりして別のウィンドウを動かしてしまうので、名前でなく位置と大きさで照合する。最大5回やり直す
+	-- Titles can be duplicated or rewritten by Claude Code at any time, so match by position and size. Retry up to 5 times
 	repeat 5 times
 		tell application "Terminal"
 			set bounds of window id wid to b
@@ -405,7 +406,7 @@ on placeWindow(wid, b)
 	end repeat
 end placeWindow
 
--- 補助スクリプトの置き場（TILE_HOME/libexec/）。TILE_HOME が無ければ ~/.local/share/tile
+-- Location of the helper scripts ($TILE_HOME/libexec/, default ~/.local/share/tile)
 on libexecDir()
 	set h to system attribute "TILE_HOME"
 	if h is "" then set h to POSIX path of (path to home folder) & ".local/share/tile"
@@ -413,7 +414,7 @@ on libexecDir()
 	return h & "libexec/"
 end libexecDir
 
--- 前面のウィンドウの ⌘+ / ⌘- を戻す（表示 → デフォルトのフォントサイズ）。メニュー名は日本語 → 英語の順に試し、どちらも無ければ ⌘0 を送る
+-- Undo ⌘+ / ⌘- on the front window (View → Default Font Size). Tries the Japanese, then English menu names, then sends ⌘0
 on resetZoom()
 	tell application "System Events" to tell process "Terminal"
 		perform action "AXRaise" of window 1
@@ -429,7 +430,7 @@ on resetZoom()
 	end tell
 end resetZoom
 
--- bounds b が、今見えているデスクトップのウィンドウの位置・大きさのどれかと ±2px で一致するか（丸め誤差で1pxずれることがある）
+-- Whether bounds b matches any of shownRects within ±2px (rounding can shift windows by 1px)
 on rectShown(b, shownRects)
 	repeat with r in shownRects
 		set ok to true

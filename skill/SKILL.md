@@ -1,29 +1,34 @@
 ---
 name: tile
-description: Claude Code / Codex が動いている Terminal.app のウィンドウを、外部モニター（1台に6枚まで縦長1段・超えたら右のモニターへ。無ければ今見えているディスプレイ）に同じ文字サイズ・同じ大きさで隙間なく並べる。「/tile」「ターミナル整列」「ターミナルを並べて」「ターミナルのサイズを揃えて」「画面いっぱいに配置して」「tile the terminals」「arrange terminal windows」で使う。
+description: Arrange every Terminal.app window running Claude Code / Codex with the same font size and window size, edge to edge, on external monitors (up to 6 per monitor in one full-height row, overflow to the next monitor on the right; the current display if there are none). Use for "/tile", "tile the terminals", "arrange the terminal windows", "make the terminals the same size" or "fill the screen with the terminals".
 ---
 
-# Claude Code ターミナルの一括整列
+# Tile the Claude Code terminals
 
-## 実行
+## Run
 
-`tile` を1回実行する（完了まで数秒〜数十秒かかるのでタイムアウトは300000ms）。`tile` が PATH に無ければ `"${TILE_HOME:-$HOME/.local/share/tile}/bin/tile"` を使う。
+Run `tile` once. It takes a few seconds to a few tens of seconds, so use a 300000ms timeout. If `tile` is not on the PATH, use `"${TILE_HOME:-$HOME/.local/share/tile}/bin/tile"`.
 
-## 引数（併用可）
+## Arguments (can be combined)
 
-- 文字サイズの指定: `tile 14`（pt）。「もう少し大きく／小さく」は直前の pt から1〜2pt 変えて渡す
-- `row`: 縦いっぱいの1段で横幅を等分（「縦長で並べて」「横幅をそろえて」）
-- `grid`: 段数を √枚数 の段組（「3段以上にして」）
-- `--no-close`: Claude Code / Codex が動いていないウィンドウを閉じずに並べる（「閉じないで」）
+- Font size: `tile 14` (pt). For "a bit bigger / smaller", change the previous size by 1–2pt
+- `row`: one full-height row with equal widths ("put them side by side", "make them tall")
+- `grid`: floor(√n) rows ("use three or more rows")
+- `--no-close`: keep windows that are not running Claude Code / Codex ("don't close anything")
 
-## 結果と報告
+## Result and report
 
-結果は2行で返る（例: 「Terminal: 5枚を閉じた（…16枚は残す）」「2画面: 6枚/1段 + 3枚/1段 / 18pt」）。
+The command prints two lines, for example:
 
-結果の枚数・段構成が想定どおりかを見て、閉じた枚数・並べた枚数・段と列の構成・文字サイズだけを短く報告する。
+```
+Terminal: Closed 5 idle window(s), kept 9 running Claude Code/Codex
+2 display(s): 6 in 1 row(s) + 3 in 1 row(s) / 18pt
+```
 
-## 注意
+Check that the counts and rows look right, then report briefly: windows closed, windows arranged, row and column layout, and font size.
 
-- 実行中は各ウィンドウが順に前面に出るため、ユーザーに操作しないでもらう
-- エラー -1719 / -25211 はアクセシビリティ未許可。システム設定 → プライバシーとセキュリティ → アクセシビリティ で実行元アプリ（Terminal 等）を許可してもらう
-- 並び順のテーマは `~/.config/tile/priorities.json`。優先順位の変更を頼まれたらテーマの `owner_rank` を直す（無ければ `window_keys` を付けて足す）。各ウィンドウの判定は `/usr/bin/python3 "${TILE_HOME:-$HOME/.local/share/tile}/libexec/terminal-agent-dirs.py"`（5列目がテーマ名）で見られる
+## Notes
+
+- Windows come to the front one by one while it runs, so ask the user not to type until it finishes
+- Errors -1719 / -25211 mean Accessibility access is missing. Ask the user to allow the app running tile (Terminal, etc.) in System Settings → Privacy & Security → Accessibility
+- The theme order lives in `~/.config/tile/priorities.json`. When the user wants a different order, change the theme's `owner_rank` (add a theme with `window_keys` if it doesn't exist). To see how each window is classified, run `/usr/bin/python3 "${TILE_HOME:-$HOME/.local/share/tile}/libexec/terminal-agent-dirs.py"` (column 5 is the theme)
