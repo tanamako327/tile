@@ -1,0 +1,20 @@
+{
+  "pin_title_keys": ["[pin]"],
+  "themes": [
+    {
+      "name": "project-a",
+      "owner_rank": 1,
+      "window_keys": ["project-a"]
+    },
+    {
+      "name": "project-b",
+      "owner_rank": 2,
+      "window_keys": ["project-b"],
+      "dir_keys": ["project-b"]
+    },
+    {
+      "name": "docs",
+      "window_keys": ["docs"]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Terminal.app の Claude Code / Codex ウィンドウを整列する。install.sh が ~/.local/bin/tile にリンクする。
+set -eu
+TILE_HOME="${TILE_HOME:-$HOME/.local/share/tile}"
+export TILE_HOME
+case "${1-}" in
+  --help|-h)
+    cat <<'USAGE'
+Usage: tile [--no-close] [row|grid] [font-size]
+
+Terminal.app で Claude Code / Codex が動いているウィンドウを、同じ文字サイズ・同じ大きさで隙間なく並べます。
+  (引数なし)   Claude Code / Codex が動いていないウィンドウを閉じてから整列。文字サイズは画面の大きさから自動
+  --no-close   ウィンドウを閉じずに整列
+  row          縦いっぱいの1段で横幅を等分
+  grid         段数を √枚数 にした段組
+  14           文字サイズを 14pt に指定（他の引数と併用可）
+設定: ~/.config/tile/priorities.json（並び順のテーマ）
+USAGE
+    exit 0 ;;
+  --version)
+    cat "$TILE_HOME/VERSION" 2>/dev/null || echo unknown
+    exit 0 ;;
+esac
+SCRIPT="$TILE_HOME/tile-terminals.scpt"
+[ -f "$SCRIPT" ] || SCRIPT="$TILE_HOME/libexec/tile-terminals.applescript"
+exec /usr/bin/osascript "$SCRIPT" "$@"
